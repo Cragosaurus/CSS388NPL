@@ -227,6 +227,7 @@ class RNNDecoder(nn.Module):
         :param bidirect: True if bidirectional, false otherwise
         """
         super(RNNEncoder, self).__init__()
+        self.embedding = nn.Embedding(output_size, hidden_size)
         self.hidden_size = hidden_size
         self.output_size = output_size
         self.rnn = nn.LSTM(input_emb_dim, hidden_size, num_layers=1, batch_first=True,
@@ -234,34 +235,57 @@ class RNNDecoder(nn.Module):
         self.out = nn.Linear(hidden_size, self.output_size)
         self.softmax = nn.LogSoftmax(dim=1)
 
-    def get_output_size(self):
-        return self.hidden_size * 2 if self.bidirect else self.hidden_size
 
-    def sent_lens_to_mask(self, lens, max_length):
-        return torch.from_numpy(np.asarray([[1 if j < lens.data[i].item() else 0 for j in range(0, max_length)] for i in range(0, lens.shape[0])]))
-
-    def forward(self, embedded_words, input_lens):
+    def forward(self, input, hidden):
         """
         Runs the forward pass of the LSTM
-        :param embedded_words: [batch size x sent len x input dim] tensor
-        :param input_lens: [batch size]-length vector containing the length of each input sentence
-        :return: output (each word's representation), context_mask (a mask of 0s and 1s
-        reflecting where the model's output should be considered), and h_t, a *tuple* containing
-        the final states h and c from the encoder for each sentence.
-        Note that output is only needed for attention, and context_mask is only used for batched attention.
         """
-        # Takes the embedded sentences, "packs" them into an efficient Pytorch-internal representation
-        packed_embedding = nn.utils.rnn.pack_padded_sequence(embedded_words, input_lens, batch_first=False, enforce_sorted=False)
-        # Runs the RNN over each sequence. Returns output at each position as well as the last vectors of the RNN
-        # state for each sentence (first/last vectors for bidirectional)
-        output, hn = self.rnn(packed_embedding)
-        # Unpacks the Pytorch representation into normal tensors
-        output, sent_lens = nn.utils.rnn.pad_packed_sequence(output)
-        max_length = max(input_lens.data).item()
-        context_mask = self.sent_lens_to_mask(sent_lens, max_length)
-        output = self.softmax(self.out(output[0]))
 
-        return (output, context_mask, hn)
+        output = self.embedding(input).view(1, 1, -1)
+        output = F.relu(output)
+        output, hidden = self.gru(output, hidden)
+        output = self.softmax(self.out(output[0]))
+        return output, hidden
+
+    def initHidden(self):
+        return torch.zeros(1, 1, self.hidden_size)
+
+
+class AttnDecoderRNN(nn.Module):
+    def __init__(self, hidden_size, output_size, dropout_p=0.1, max_length=20):
+        super(AttnDecoderRNN, self).__init__()
+        self.hidden_size = hidden_size
+        self.output_size = output_size
+        self.dropout_p = dropout_p
+        self.max_length = max_length
+
+        self.embedding = nn.Embedding(self.output_size, self.hidden_size)
+        self.attn = nn.Linear(self.hidden_size * 2, self.max_length)
+        self.attn_combine = nn.Linear(self.hidden_size * 2, self.hidden_size)
+        self.dropout = nn.Dropout(self.dropout_p)
+        self.gru = nn.GRU(self.hidden_size, self.hidden_size)
+        self.out = nn.Linear(self.hidden_size, self.output_size)
+
+    def forward(self, input, hidden, encoder_outputs):
+        embedded = self.embedding(input).view(1, 1, -1)
+        embedded = self.dropout(embedded)
+
+        attn_weights = F.softmax(
+            self.attn(torch.cat((embedded[0], hidden[0]), 1)), dim=1)
+        attn_applied = torch.bmm(attn_weights.unsqueeze(0),
+                                 encoder_outputs.unsqueeze(0))
+
+        output = torch.cat((embedded[0], attn_applied[0]), 1)
+        output = self.attn_combine(output).unsqueeze(0)
+
+        output = F.relu(output)
+        output, hidden = self.gru(output, hidden)
+
+        output = F.log_softmax(self.out(output[0]), dim=1)
+        return output, hidden, attn_weights
+
+    def initHidden(self):
+        return torch.zeros(1, 1, self.hidden_size, device=device)
 
 def make_padded_input_tensor(exs: List[Example], input_indexer: Indexer, max_len: int, reverse_input=False) -> np.ndarray:
     """
@@ -331,7 +355,8 @@ def train_model_encdec(train_data: List[Example], dev_data: List[Example], input
     EMBED_DIM = 8
     NUM_LAYERS = 3
     HIDDEN_DIM = 96
-    DROP_PROB = 0.5
+    DROP_PROB = 0.2
+    TEACHER_FORCING_RATIO = 0.5
 
     s2smodel = Seq2SeqSemanticParser(input_indexer,output_indexer, EMBED_DIM, HIDDEN_DIM, DROP_PROB)
     print('Encoded Tensor Example ------------------------------------------')
