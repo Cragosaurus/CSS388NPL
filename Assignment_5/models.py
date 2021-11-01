@@ -70,7 +70,7 @@ class Seq2SeqSemanticParser(nn.Module):
         
         self.input_emb = EmbeddingLayer(emb_dim, len(input_indexer), embedding_dropout)
         self.encoder = RNNEncoder(emb_dim, hidden_size, bidirect)
-        self.decoder = RNNDecoder(emb_dim, hidden_size, self.output_size, bidirect)
+        self.decoder = RNNDecoder(emb_dim, hidden_size, self.output_size)
         self.hidden_size = hidden_size
         self.embedding_dropout = embedding_dropout
         self.bidirect = bidirect
@@ -226,7 +226,7 @@ class RNNDecoder(nn.Module):
         :param hidden_size: hidden size for the LSTM
         :param bidirect: True if bidirectional, false otherwise
         """
-        super(RNNEncoder, self).__init__()
+        super(RNNDecoder, self).__init__()
         self.embedding = nn.Embedding(output_size, hidden_size)
         self.hidden_size = hidden_size
         self.output_size = output_size
@@ -361,5 +361,5 @@ def train_model_encdec(train_data: List[Example], dev_data: List[Example], input
     s2smodel = Seq2SeqSemanticParser(input_indexer,output_indexer, EMBED_DIM, HIDDEN_DIM, DROP_PROB)
     print('Encoded Tensor Example ------------------------------------------')
     encoded = s2smodel.encode_input(torch.unsqueeze(torch.Tensor(all_train_input_data[0]).type(torch.LongTensor),0), torch.Tensor([input_max_len]).type(torch.LongTensor))
-
+    print(encoded)
     raise Exception("Implement the rest of me to train your encoder-decoder model")
