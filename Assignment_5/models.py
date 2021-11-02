@@ -63,7 +63,7 @@ class NearestNeighborSemanticParser(object):
         return test_derivs
 
 class Seq2SeqSemanticParser(nn.Module):
-    def __init__(self, input_indexer, output_indexer, emb_dim, hidden_size, embedding_dropout=0.2, bidirect=True):
+    def __init__(self, input_indexer, output_indexer, emb_dim, hidden_size, output_length, embedding_dropout=0.2, bidirect=True):
         # We've include some args for setting up the input embedding and encoder
         # You'll need to add code for output embedding and decoder
         super(Seq2SeqSemanticParser, self).__init__()
@@ -72,7 +72,7 @@ class Seq2SeqSemanticParser(nn.Module):
         output_size = len(output_indexer)
 
         self.encoder = RNNEncoder(len(input_indexer), hidden_size).to(device)
-        self.decoder = AttnDecoderRNN(hidden_size, output_size, output_size-1).to(device)
+        self.decoder = AttnDecoderRNN(hidden_size, output_size, output_length).to(device)
         self.hidden_size = hidden_size
         self.embedding_dropout = embedding_dropout
         self.bidirect = bidirect
@@ -157,9 +157,13 @@ class AttnDecoderRNN(nn.Module):
     def forward(self, input, hidden, encoder_outputs):
         embedded = self.embedding(input).view(1, 1, -1)
         embedded = self.dropout(embedded)
+        #print('Decoder Forward--------------------')
+        #print(f'Hidden Size: {hidden.shape}')
+        #print(f'Embedded Size: {embedded.shape}')
 
-        attn_weights = F.softmax(
-            self.attn(torch.cat((embedded[0], hidden[0]), 1)), dim=1)
+        attn_weights = F.softmax(self.attn(torch.cat((embedded[0], hidden[0]), 1)), dim=1)
+        #print(f'Attn Weights: {attn_weights.shape}')
+        #print(f'Encoder Outputs: {encoder_outputs.shape}')
         attn_applied = torch.bmm(attn_weights.unsqueeze(0),
                                  encoder_outputs.unsqueeze(0))
 
@@ -226,11 +230,11 @@ def train(input_tensor, target_tensor, encoder, decoder, encoder_optimizer, deco
             input_tensor[ei], encoder_hidden)
         encoder_outputs[ei] = encoder_output[0, 0]
 
-    print(f'Encoder Outputs shape: {encoder_outputs.shape}')
+    #print(f'Encoder Outputs shape: {encoder_outputs.shape}')
 
     decoder_input = torch.tensor([[tokens[0]]], device=device)
 
-    print(f'Decoder Input: {decoder_input}')
+    #print(f'Decoder Input: {decoder_input}')
 
     decoder_hidden = encoder_hidden
 
@@ -309,7 +313,7 @@ def train_model_encdec(train_data: List[Example], dev_data: List[Example], input
     tokens.append(int(1))
     print(f'Tokens: {tokens}')
 
-    s2smodel = Seq2SeqSemanticParser(input_indexer,output_indexer, EMBED_DIM, HIDDEN_DIM, DROP_PROB)
+    s2smodel = Seq2SeqSemanticParser(input_indexer,output_indexer, EMBED_DIM, HIDDEN_DIM, output_max_len, DROP_PROB)
     encoder = s2smodel.encoder
     decoder = s2smodel.decoder
     print('Encoded Tensor Example ------------------------------------------')
@@ -327,14 +331,16 @@ def train_model_encdec(train_data: List[Example], dev_data: List[Example], input
     decoder_optimizer = optim.SGD(decoder.parameters(), lr=learning_rate)
     criterion = nn.NLLLoss()
 
+    print_loss_total = 0
+
     for iter in range(1, epochs + 1):
 
         input_tensor = torch.unsqueeze(input[iter-  1], 1)
         target_tensor = torch.unsqueeze(output[iter - 1], 1)
-        print(f'Input Tensor Shape: {input_tensor.shape}')
-        print(f'Input Tensor: {input_tensor}')
-        print(f'Target Tensor Shape: {target_tensor.shape}')
-        print(f'Target Tensor: {target_tensor}')
+        #print(f'Input Tensor Shape: {input_tensor.shape}')
+        #print(f'Input Tensor: {input_tensor}')
+        #print(f'Target Tensor Shape: {target_tensor.shape}')
+        #print(f'Target Tensor: {target_tensor}')
         loss = train(input_tensor, target_tensor, encoder, decoder, encoder_optimizer, decoder_optimizer, criterion, output_max_len, tokens)
         print_loss_total += loss
 
