@@ -76,6 +76,7 @@ class Seq2SeqSemanticParser(nn.Module):
         self.hidden_size = hidden_size
         self.embedding_dropout = embedding_dropout
         self.bidirect = bidirect
+
         
 
     def forward(self, x_tensor, inp_lens_tensor, y_tensor, out_lens_tensor):
@@ -89,7 +90,25 @@ class Seq2SeqSemanticParser(nn.Module):
         raise Exception("implement me!")
 
     def decode(self, test_data: List[Example]) -> List[List[Derivation]]:
-        raise Exception("implement me!")
+        print(test_data[0])
+        max_length = self.decoder.max_length
+        input_length = np.max(np.asarray([len(ex.x_indexed) for ex in test_data]))
+        all_test_input_data = make_padded_input_tensor(test_data, self.input_indexer, input_length, reverse_input=False)
+        encoder_outputs = torch.zeros(max_length, self.encoder.hidden_size, device=device)
+        encoder_hidden = self.encoder.initHidden()
+        input = torch.Tensor(all_test_input_data).type(torch.LongTensor)
+        input = input.to(device)
+        self.encoder.eval()
+        self.decoder.eval()
+
+        for ei in range(len(test_data)):
+            print(f'Input ei Shape: {input[ei].shape}')
+            print(f'Encoder Hidden Shape: {encoder_hidden.shape}')
+            encoder_output, encoder_hidden = self.encoder(
+                torch.unsqueeze(input[ei], 1), encoder_hidden)
+            encoder_outputs[ei] = encoder_output[0, 0]
+
+        print('Made it encoding outputs without failing!')
 
 
 class RNNEncoder(nn.Module):
@@ -105,6 +124,7 @@ class RNNEncoder(nn.Module):
         """
         super(RNNEncoder, self).__init__()
         self.hidden_size = hidden_size
+        self.input_size = input_size
 
         self.embedding = nn.Embedding(input_size, hidden_size)
         self.gru = nn.GRU(hidden_size, hidden_size)
@@ -305,10 +325,10 @@ def train_model_encdec(train_data: List[Example], dev_data: List[Example], input
     NUM_LAYERS = 3
     HIDDEN_DIM = 96
     DROP_PROB = 0.2
-    learning_rate = 0.01
+    learning_rate = 0.005
     tokens = []
-    epochs = 5000
-    print_every = 500
+    epochs = 2
+    print_every = 1
     tokens.append(int(0))
     tokens.append(int(1))
     print(f'Tokens: {tokens}')
@@ -317,7 +337,6 @@ def train_model_encdec(train_data: List[Example], dev_data: List[Example], input
     encoder = s2smodel.encoder
     decoder = s2smodel.decoder
     print('Encoded Tensor Example ------------------------------------------')
-    #input = s2smodel.encode_input(torch.Tensor(all_train_input_data).type(torch.LongTensor), torch.Tensor([input_max_len]).type(torch.LongTensor))
     input = torch.Tensor(all_train_input_data).type(torch.LongTensor)
     input = input.to(device)
     output = torch.Tensor(all_train_output_data).type(torch.LongTensor)
@@ -333,20 +352,23 @@ def train_model_encdec(train_data: List[Example], dev_data: List[Example], input
 
     print_loss_total = 0
 
-    for iter in range(1, epochs + 1):
+    index = [*range(0,len(all_test_input_data))]
 
-        input_tensor = torch.unsqueeze(input[iter-  1], 1)
-        target_tensor = torch.unsqueeze(output[iter - 1], 1)
-        #print(f'Input Tensor Shape: {input_tensor.shape}')
-        #print(f'Input Tensor: {input_tensor}')
-        #print(f'Target Tensor Shape: {target_tensor.shape}')
-        #print(f'Target Tensor: {target_tensor}')
-        loss = train(input_tensor, target_tensor, encoder, decoder, encoder_optimizer, decoder_optimizer, criterion, output_max_len, tokens)
-        print_loss_total += loss
+    for epoch in range(1, epochs + 1):
+        random.shuffle(index)
+        for i in index:
+            input_tensor = torch.unsqueeze(input[i], 1)
+            target_tensor = torch.unsqueeze(output[i], 1)
+            #print(f'Input Tensor Shape: {input_tensor.shape}')
+            #print(f'Input Tensor: {input_tensor}')
+            #print(f'Target Tensor Shape: {target_tensor.shape}')
+            #print(f'Target Tensor: {target_tensor}')
+            loss = train(input_tensor, target_tensor, encoder, decoder, encoder_optimizer, decoder_optimizer, criterion, output_max_len, tokens)
+            print_loss_total += loss
 
-        if iter % print_every == 0:
+        if epoch % print_every == 0:
             print_loss_avg = print_loss_total / print_every
             print_loss_total = 0
-            print(f'Epoch: {iter}, Loss: {print_loss_avg}')
+            print(f'Epoch: {epoch}, Loss: {print_loss_avg}')
 
-    raise Exception("Implement the rest of me to train your encoder-decoder model")
+    return s2smodel
