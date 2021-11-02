@@ -90,25 +90,28 @@ class Seq2SeqSemanticParser(nn.Module):
         raise Exception("implement me!")
 
     def decode(self, test_data: List[Example]) -> List[List[Derivation]]:
-        print(test_data[0])
-        max_length = self.decoder.max_length
-        input_length = np.max(np.asarray([len(ex.x_indexed) for ex in test_data]))
-        all_test_input_data = make_padded_input_tensor(test_data, self.input_indexer, input_length, reverse_input=False)
-        encoder_outputs = torch.zeros(max_length, self.encoder.hidden_size, device=device)
-        encoder_hidden = self.encoder.initHidden()
-        input = torch.Tensor(all_test_input_data).type(torch.LongTensor)
-        input = input.to(device)
-        self.encoder.eval()
-        self.decoder.eval()
+        with torch.no_grad():
+            print(test_data[0])
+            encoder_max_length = self.encoder.max_length
+            input_length = np.max(np.asarray([len(ex.x_indexed) for ex in test_data]))
+            all_test_input_data = make_padded_input_tensor(test_data, self.input_indexer, input_length, reverse_input=False)
+            encoder_outputs = torch.zeros(encoder_max_length, self.encoder.hidden_size, device=device)
+            encoder_hidden = self.encoder.initHidden()
+            input = torch.Tensor(all_test_input_data).type(torch.LongTensor)
+            print(f'Input data sample: {test_data[0]}')
+            print(f'Transformed Input Sample: {torch.unsqueeze(torch.Tensor(all_test_input_data[0]).type(torch.LongTensor), 0)}')
+            input = input.to(device)
+            self.encoder.eval()
+            self.decoder.eval()
 
-        for ei in range(len(test_data)):
-            print(f'Input ei Shape: {input[ei].shape}')
-            print(f'Encoder Hidden Shape: {encoder_hidden.shape}')
-            encoder_output, encoder_hidden = self.encoder(
-                torch.unsqueeze(input[ei], 1), encoder_hidden)
-            encoder_outputs[ei] = encoder_output[0, 0]
+            for ei in range(len(test_data)):
+                print(f'Input ei Shape: {torch.unsqueeze(input[ei],0).shape}')
+                print(f'Encoder Hidden Shape: {encoder_hidden.shape}')
+                encoder_output, encoder_hidden = self.encoder(
+                    torch.unsqueeze(input[ei],0), encoder_hidden)
+                encoder_outputs[ei] += encoder_output[0, 0]
 
-        print('Made it encoding outputs without failing!')
+            print('Made it encoding outputs without failing!')
 
 
 class RNNEncoder(nn.Module):
