@@ -60,6 +60,7 @@ class NearestNeighborSemanticParser(object):
                     best_train_ex = train_ex
             # Note that this is a list of a single Derivation
             test_derivs.append([Derivation(test_ex, 1.0, best_train_ex.y_tok)])
+        print(test_derivs)
         return test_derivs
 
 class Seq2SeqSemanticParser(nn.Module):
@@ -92,26 +93,54 @@ class Seq2SeqSemanticParser(nn.Module):
     def decode(self, test_data: List[Example]) -> List[List[Derivation]]:
         with torch.no_grad():
             print(test_data[0])
-            encoder_max_length = self.encoder.max_length
-            input_length = np.max(np.asarray([len(ex.x_indexed) for ex in test_data]))
-            all_test_input_data = make_padded_input_tensor(test_data, self.input_indexer, input_length, reverse_input=False)
-            encoder_outputs = torch.zeros(encoder_max_length, self.encoder.hidden_size, device=device)
-            encoder_hidden = self.encoder.initHidden()
+            max_length = np.max(np.asarray([len(ex.x_indexed) for ex in test_data]))
+            all_test_input_data = make_padded_input_tensor(test_data, self.input_indexer, max_length, reverse_input=False)
+
             input = torch.Tensor(all_test_input_data).type(torch.LongTensor)
-            print(f'Input data sample: {test_data[0]}')
-            print(f'Transformed Input Sample: {torch.unsqueeze(torch.Tensor(all_test_input_data[0]).type(torch.LongTensor), 0)}')
+            #print(f'Input data sample: {test_data[0]}')
+            #print(f'Transformed Input Sample: {torch.unsqueeze(torch.Tensor(all_test_input_data[0]).type(torch.LongTensor), 0)}')
             input = input.to(device)
-            self.encoder.eval()
-            self.decoder.eval()
+            tokens = []
+            tokens.append(int(0))
+            tokens.append(int(1))
 
-            for ei in range(len(test_data)):
-                print(f'Input ei Shape: {torch.unsqueeze(input[ei],0).shape}')
-                print(f'Encoder Hidden Shape: {encoder_hidden.shape}')
-                encoder_output, encoder_hidden = self.encoder(
-                    torch.unsqueeze(input[ei],0), encoder_hidden)
-                encoder_outputs[ei] += encoder_output[0, 0]
+            decoded = []
 
-            print('Made it encoding outputs without failing!')
+            for tensor in input:
+                input_length = tensor.size(0)
+                tensor = torch.unsqueeze(tensor, 1)
+                encoder_outputs = torch.zeros(max_length, self.encoder.hidden_size, device=device)
+                encoder_hidden = self.encoder.initHidden()
+                for ei in range(input_length):
+                    #print(f'Input ei Shape: {torch.unsqueeze(tensor[ei],1).shape}')
+                    #print(f'Encoder Hidden Shape: {encoder_hidden.shape}')
+                    encoder_output, encoder_hidden = self.encoder(tensor[ei], encoder_hidden)
+                    encoder_outputs[ei] = encoder_output[0, 0]
+
+                decoder_input = torch.tensor([[tokens[0]]], device=device)  # SOS
+
+                decoder_hidden = encoder_hidden
+
+                decoded_words = []
+                decoder_attentions = torch.zeros(max_length, max_length)
+
+                for di in range(max_length):
+                    decoder_output, decoder_hidden, decoder_attention = self.decoder(
+                        decoder_input, decoder_hidden, encoder_outputs)
+                    decoder_attentions[di] = decoder_attention.data
+                    topv, topi = decoder_output.data.topk(1)
+                    if topi.item() == tokens[1]:
+                        #decoded_words.append('<EOS>')
+                        break
+                    else:
+                        decoded_words.append(self.output_indexer.get_object([topi.item()]))
+
+                    decoder_input = topi.squeeze().detach()
+                decoded.append(decoded_words)
+
+            return decoded
+
+
 
 
 class RNNEncoder(nn.Module):
@@ -133,7 +162,10 @@ class RNNEncoder(nn.Module):
         self.gru = nn.GRU(hidden_size, hidden_size)
 
     def forward(self, input, hidden):
+        #print(f'Forward input (pre-embed) Shape: {input.shape}')
         embedded = self.embedding(input).view(1, 1, -1)
+        #print(f'Forward Embedded (input) Shape: {embedded.shape}')
+        #print(f'Forward Hidden Shape: {hidden.shape}')
         output = embedded
         output, hidden = self.gru(output, hidden)
         return output, hidden
