@@ -71,6 +71,7 @@ class Seq2SeqSemanticParser(nn.Module):
         self.input_indexer = input_indexer
         self.output_indexer = output_indexer
         output_size = len(output_indexer)
+        self.output_length = output_length
 
         self.encoder = RNNEncoder(len(input_indexer), hidden_size).to(device)
         self.decoder = AttnDecoderRNN(hidden_size, output_size, output_length).to(device)
@@ -109,7 +110,7 @@ class Seq2SeqSemanticParser(nn.Module):
             for tensor in input:
                 input_length = tensor.size(0)
                 tensor = torch.unsqueeze(tensor, 1)
-                encoder_outputs = torch.zeros(max_length, self.encoder.hidden_size, device=device)
+                encoder_outputs = torch.zeros(self.output_length, self.encoder.hidden_size, device=device)
                 encoder_hidden = self.encoder.initHidden()
                 for ei in range(input_length):
                     #print(f'Input ei Shape: {torch.unsqueeze(tensor[ei],1).shape}')
@@ -122,18 +123,20 @@ class Seq2SeqSemanticParser(nn.Module):
                 decoder_hidden = encoder_hidden
 
                 decoded_words = []
-                decoder_attentions = torch.zeros(max_length, max_length)
+                decoder_attentions = torch.zeros(self.output_length, self.output_length)
 
                 for di in range(max_length):
                     decoder_output, decoder_hidden, decoder_attention = self.decoder(
                         decoder_input, decoder_hidden, encoder_outputs)
                     decoder_attentions[di] = decoder_attention.data
                     topv, topi = decoder_output.data.topk(1)
+                    #print(f'Top V: {topv}')
+                    #print(f'Top I: {topi.item()}')
                     if topi.item() == tokens[1]:
                         #decoded_words.append('<EOS>')
                         break
                     else:
-                        decoded_words.append(self.output_indexer.get_object([topi.item()]))
+                        decoded_words.append(self.output_indexer.get_object(topi.item()))
 
                     decoder_input = topi.squeeze().detach()
                 decoded.append(decoded_words)
