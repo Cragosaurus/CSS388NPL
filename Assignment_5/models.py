@@ -164,7 +164,7 @@ class RNNEncoder(nn.Module):
         self.dropout_p = dropout_p
         self.embedding = nn.Embedding(input_size, hidden_size)
         self.dropout = nn.Dropout(self.dropout_p)
-        self.gru = nn.GRU(hidden_size, hidden_size)
+        self.gru = nn.GRU(hidden_size, hidden_size, bidirectional=True)
 
     def forward(self, input, hidden):
         # print(f'Forward input (pre-embed) Shape: {input.shape}')
@@ -177,7 +177,7 @@ class RNNEncoder(nn.Module):
         return output, hidden
 
     def initHidden(self):
-        return torch.zeros(1, 1, self.hidden_size, device=device)
+        return torch.zeros(2, 1, self.hidden_size, device=device)
 
 
 class RNNDecoder(nn.Module):
@@ -211,10 +211,10 @@ class AttnDecoderRNN(nn.Module):
 
         self.embedding = nn.Embedding(self.output_size, self.hidden_size)
         self.attn = nn.Linear(self.hidden_size * 2, self.max_length)
-        self.attn_combine = nn.Linear(self.hidden_size * 2, self.hidden_size)
+        self.attn_combine = nn.Linear(self.hidden_size * 3, self.hidden_size)
         self.dropout = nn.Dropout(self.dropout_p)
-        self.gru = nn.GRU(self.hidden_size, self.hidden_size)
-        self.out = nn.Linear(self.hidden_size, self.output_size)
+        self.gru = nn.GRU(self.hidden_size, self.hidden_size, bidirectional=True)
+        self.out = nn.Linear(self.hidden_size*2, self.output_size)
 
     def forward(self, input, hidden, encoder_outputs):
         embedded = self.embedding(input).view(1, 1, -1)
@@ -230,16 +230,20 @@ class AttnDecoderRNN(nn.Module):
                                  encoder_outputs.unsqueeze(0))
 
         output = torch.cat((embedded[0], attn_applied[0]), 1)
+        #print(f'attention applied: {attn_applied.shape}')
+        #print(f'output: {output.shape}')
         output = self.attn_combine(output).unsqueeze(0)
 
         output = F.relu(output)
         output, hidden = self.gru(output, hidden)
 
+        #print(f'output size: {output[0].shape}')
+
         output = F.log_softmax(self.out(output[0]), dim=1)
         return output, hidden, attn_weights
 
     def initHidden(self):
-        return torch.zeros(1, 1, self.hidden_size, device=device)
+        return torch.zeros(2, 1, self.hidden_size, device=device)
 
 
 def make_padded_input_tensor(exs: List[Example], input_indexer: Indexer, max_len: int,
@@ -289,13 +293,15 @@ def train(input_tensor, target_tensor, encoder, decoder, encoder_optimizer, deco
     input_length = input_tensor.size(0)
     target_length = target_tensor.size(0)
 
-    encoder_outputs = torch.zeros(max_length, encoder.hidden_size, device=device)
+    encoder_outputs = torch.zeros(max_length, encoder.hidden_size*2, device=device)
+    #print(f'Encoder_Outputs: {encoder_outputs.shape}')
 
     loss = 0
 
     for ei in range(input_length):
         encoder_output, encoder_hidden = encoder(
             input_tensor[ei], encoder_hidden)
+        #print(f'encoder_output00: {encoder_output[0,0].shape}')
         encoder_outputs[ei] = encoder_output[0, 0]
 
     # print(f'Encoder Outputs shape: {encoder_outputs.shape}')
@@ -358,7 +364,7 @@ def train_model_encdec(train_data: List[Example], dev_data: List[Example], input
     tokens.append(output_indexer.index_of('<SOS>'))
     tokens.append(output_indexer.index_of('<EOS>'))
     tokens.append(output_indexer.index_of('<PAD>'))
-    print(f'Start\Stop Tokens: {tokens}')
+    print(f'Start\Stop\Pad Tokens: {tokens}')
     output_max_len = np.max(np.asarray([len(ex.y_indexed) for ex in train_data]))
     all_train_output_data = make_padded_output_tensor(train_data, output_indexer, output_max_len)
     all_test_output_data = make_padded_output_tensor(dev_data, output_indexer, output_max_len)
