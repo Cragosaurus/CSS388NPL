@@ -385,6 +385,7 @@ def train_model_encdec(train_data: List[Example], dev_data: List[Example], input
     HIDDEN_DIM = 156
     DROP_PROB = 0.2
     learning_rate = 0.001
+    lr_update_freq = 20
     epochs = 100
     print_every = 1
 
@@ -405,6 +406,9 @@ def train_model_encdec(train_data: List[Example], dev_data: List[Example], input
 
     index = [*range(0, len(all_test_input_data))]
 
+    best_model = s2smodel
+    best_loss = 1000
+
     for epoch in range(1, epochs + 1):
         random.shuffle(index)
         for i in index:
@@ -423,12 +427,14 @@ def train_model_encdec(train_data: List[Example], dev_data: List[Example], input
             print_loss_total = 0
             print(f'Epoch: {epoch}, Loss: {print_loss_avg}')
 
-        if print_loss_avg < 0.05:
-            break
+        if print_loss_avg < best_loss:
+            print(f'>>>>>>> New Best Model: {print_loss_avg} <<<<<<<')
+            best_loss = print_loss_avg
+            best_model = s2smodel
 
-        if epoch % print_every == 30:
+        if epoch % lr_update_freq == 0:
             learning_rate = learning_rate * 0.5
             encoder_optimizer.param_groups[0]['lr'] = learning_rate
             decoder_optimizer.param_groups[0]['lr'] = learning_rate
 
-    return s2smodel
+    return best_model
