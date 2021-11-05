@@ -379,22 +379,17 @@ def train_model_encdec(train_data: List[Example], dev_data: List[Example], input
     HIDDEN_DIM = 128
     DROP_PROB = 0.2
     learning_rate = 0.001
-    epochs = 5
+    epochs = 125
     print_every = 1
 
 
     s2smodel = Seq2SeqSemanticParser(input_indexer, output_indexer, EMBED_DIM, HIDDEN_DIM, output_max_len, tokens, DROP_PROB)
     encoder = s2smodel.encoder
     decoder = s2smodel.decoder
-    print('Encoded Tensor Example ------------------------------------------')
     input = torch.Tensor(all_train_input_data).type(torch.LongTensor)
     input = input.to(device)
     output = torch.Tensor(all_train_output_data).type(torch.LongTensor)
     output = output.to(device)
-
-    print(f'Input Shape: {input.shape}')
-
-    print(f'Output Shape: {output.shape}')
 
     encoder_optimizer = optim.Adam(encoder.parameters(), lr=learning_rate)
     decoder_optimizer = optim.Adam(decoder.parameters(), lr=learning_rate)
@@ -422,7 +417,7 @@ def train_model_encdec(train_data: List[Example], dev_data: List[Example], input
             print_loss_total = 0
             print(f'Epoch: {epoch}, Loss: {print_loss_avg}')
 
-        if epoch % print_every == 20:
+        if epoch % print_every == 30:
             learning_rate = learning_rate * 0.5
             encoder_optimizer.param_groups[0]['lr'] = learning_rate
             decoder_optimizer.param_groups[0]['lr'] = learning_rate
