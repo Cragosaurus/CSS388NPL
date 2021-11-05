@@ -152,7 +152,7 @@ class RNNEncoder(nn.Module):
     with a leading dimension of 1 (i.e., use batch size 1)
     """
 
-    def __init__(self, input_size, hidden_size, num_layers=3, dropout_p=0.1):
+    def __init__(self, input_size, hidden_size, num_layers=3, dropout_p=0.2):
         """
         :param input_emb_dim: size of word embeddings output by embedding layer
         :param hidden_size: hidden size for the LSTM
@@ -202,7 +202,7 @@ class RNNDecoder(nn.Module):
 
 
 class AttnDecoderRNN(nn.Module):
-    def __init__(self, hidden_size, output_size, max_length, dropout_p=0.1):
+    def __init__(self, hidden_size, output_size, max_length, dropout_p=0.2):
         super(AttnDecoderRNN, self).__init__()
         self.hidden_size = hidden_size
         self.output_size = output_size
@@ -382,10 +382,10 @@ def train_model_encdec(train_data: List[Example], dev_data: List[Example], input
 
     EMBED_DIM = 8
     NUM_LAYERS = 3
-    HIDDEN_DIM = 128
+    HIDDEN_DIM = 156
     DROP_PROB = 0.2
     learning_rate = 0.001
-    epochs = 125
+    epochs = 100
     print_every = 1
 
 
@@ -422,6 +422,9 @@ def train_model_encdec(train_data: List[Example], dev_data: List[Example], input
             print_loss_avg = print_loss_total / print_every
             print_loss_total = 0
             print(f'Epoch: {epoch}, Loss: {print_loss_avg}')
+
+        if print_loss_avg < 0.05:
+            break
 
         if epoch % print_every == 30:
             learning_rate = learning_rate * 0.5
