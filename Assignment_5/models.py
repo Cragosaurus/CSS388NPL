@@ -111,7 +111,7 @@ class Seq2SeqSemanticParser(nn.Module):
                 tensor = input[i]
                 input_length = tensor.size(0)
                 tensor = torch.unsqueeze(tensor, 1)
-                encoder_outputs = torch.zeros(self.output_length, self.encoder.hidden_size, device=device)
+                encoder_outputs = torch.zeros(self.output_length, self.encoder.hidden_size*2, device=device)
                 encoder_hidden = self.encoder.initHidden()
                 for ei in range(input_length):
                     # print(f'Input ei Shape: {torch.unsqueeze(tensor[ei],1).shape}')
