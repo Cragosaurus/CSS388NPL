@@ -1,8 +1,6 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import random
-from torch.autograd import Variable as Var
 from utils import *
 from data import *
 from lf_evaluator import *
@@ -98,7 +96,7 @@ class Seq2SeqSemanticParser(nn.Module):
         with torch.no_grad():
             print(test_data[0])
             max_length = np.max(np.asarray([len(ex.x_indexed) for ex in test_data]))
-            output_max_length = 100
+            output_max_length = 64
             all_test_input_data = make_padded_input_tensor(test_data, self.input_indexer, max_length,
                                                            reverse_input=False)
 
@@ -356,9 +354,6 @@ def train_model_encdec(train_data: List[Example], dev_data: List[Example], input
     all_train_input_data = make_padded_input_tensor(train_data, input_indexer, input_max_len, reverse_input=False)
     all_test_input_data = make_padded_input_tensor(dev_data, input_indexer, input_max_len, reverse_input=False)
 
-    print(f'Input data sample: {train_data[0]}')
-    print(f'Transformed Input Sample: {torch.unsqueeze(torch.Tensor(all_train_input_data[0]).type(torch.LongTensor), 0)}')
-
     tokens = []
     tokens.append(output_indexer.index_of('<SOS>'))
     tokens.append(output_indexer.index_of('<EOS>'))
@@ -384,7 +379,7 @@ def train_model_encdec(train_data: List[Example], dev_data: List[Example], input
     HIDDEN_DIM = 128
     DROP_PROB = 0.2
     learning_rate = 0.001
-    epochs = 85
+    epochs = 5
     print_every = 1
 
 
