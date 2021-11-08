@@ -19,7 +19,7 @@ def _parse_args():
     parser.add_argument('--do_nearest_neighbor', dest='do_nearest_neighbor', default=False, action='store_true', help='run the nearest neighbor model')
 
     parser.add_argument('--train_path', type=str, default='data/geo_train.tsv', help='path to train data')
-    parser.add_argument('--dev_path', type=str, default='data/geo_dev.tsv', help='path to dev data')
+    parser.add_argument('--dev_path', type=str, default='data/geo880_train600.tsv', help='path to dev data')
     parser.add_argument('--test_path', type=str, default='data/geo_test.tsv', help='path to blind test data')
     parser.add_argument('--test_output_path', type=str, default='geo_test_output.tsv', help='path to write blind test results')
     parser.add_argument('--domain', type=str, default='geo', help='domain (geo for geoquery)')
@@ -53,7 +53,7 @@ if __name__ == '__main__':
         if args.do_nearest_neighbor:
             decoder = NearestNeighborSemanticParser(train_data_indexed)
         else:
-            decoder = train_model_encdec(train_data_indexed, dev_data_indexed, input_indexer, output_indexer, args)
+            decoder = train_model_encdec(train_data_indexed, dev_data_indexed, test_data_indexed, input_indexer, output_indexer, args)
             torch.save(decoder, args.model_path)
     else:
         decoder = torch.load(args.model_path)

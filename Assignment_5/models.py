@@ -65,7 +65,7 @@ class NearestNeighborSemanticParser(object):
 
 
 class Seq2SeqSemanticParser(nn.Module):
-    def __init__(self, input_indexer, output_indexer, emb_dim, hidden_size, output_length, tokens, embedding_dropout=0.2,
+    def __init__(self, input_indexer, output_indexer, emb_dim, hidden_size, output_length, in_tokens, out_tokens, num_layers=3, embedding_dropout=0.2,
                  bidirect=True):
         # We've include some args for setting up the input embedding and encoder
         # You'll need to add code for output embedding and decoder
@@ -74,10 +74,13 @@ class Seq2SeqSemanticParser(nn.Module):
         self.output_indexer = output_indexer
         output_size = len(output_indexer)
         self.output_length = output_length
-        self.tokens = tokens
+        self.out_tokens = out_tokens
+        self.in_tokens = in_tokens
+        self.num_layers = num_layers
+        self.bidirect = bidirect
 
-        self.encoder = RNNEncoder(len(input_indexer), hidden_size).to(device)
-        self.decoder = AttnDecoderRNN(hidden_size, output_size, output_length).to(device)
+        self.encoder = RNNEncoder(len(input_indexer), hidden_size, self.num_layers, bidirect=bidirect).to(device)
+        self.decoder = AttnDecoderRNN(hidden_size, output_size, output_length, self.num_layers, bidirect=bidirect).to(device)
         self.hidden_size = hidden_size
         self.embedding_dropout = embedding_dropout
         self.bidirect = bidirect
@@ -94,10 +97,12 @@ class Seq2SeqSemanticParser(nn.Module):
 
     def decode(self, test_data: List[Example]) -> List[List[Derivation]]:
         with torch.no_grad():
+            self.encoder.eval()
+            self.decoder.eval()
             print(test_data[0])
             max_length = np.max(np.asarray([len(ex.x_indexed) for ex in test_data]))
-            output_max_length = 64
-            all_test_input_data = make_padded_input_tensor(test_data, self.input_indexer, max_length,
+            output_max_length = 65
+            all_test_input_data = make_padded_input_tensor(test_data, self.input_indexer, output_max_length,
                                                            reverse_input=False)
 
             input = torch.Tensor(all_test_input_data).type(torch.LongTensor)
@@ -111,7 +116,7 @@ class Seq2SeqSemanticParser(nn.Module):
                 tensor = input[i]
                 input_length = tensor.size(0)
                 tensor = torch.unsqueeze(tensor, 1)
-                encoder_outputs = torch.zeros(self.output_length, self.encoder.hidden_size*2, device=device)
+                encoder_outputs = torch.zeros(self.output_length, self.encoder.hidden_size, device=device)
                 encoder_hidden = self.encoder.initHidden()
                 for ei in range(input_length):
                     # print(f'Input ei Shape: {torch.unsqueeze(tensor[ei],1).shape}')
@@ -119,7 +124,7 @@ class Seq2SeqSemanticParser(nn.Module):
                     encoder_output, encoder_hidden = self.encoder(tensor[ei], encoder_hidden)
                     encoder_outputs[ei] = encoder_output[0, 0]
 
-                decoder_input = torch.tensor([[self.tokens[0]]], device=device)  # SOS
+                decoder_input = torch.tensor([[self.out_tokens[0]]], device=device)  # SOS
 
                 decoder_hidden = encoder_hidden
 
@@ -133,8 +138,8 @@ class Seq2SeqSemanticParser(nn.Module):
                     topv, topi = decoder_output.data.topk(1)
                     #print(f'Top V: {np.exp(topv.item())}')
                     # print(f'Top I: {topi.item()}')
-                    if topi.item() == self.tokens[1] or topi.item() == topi.item() == self.tokens[2]:
-                        #decoded_words.append('<EOS>')
+                    if topi.item() == self.out_tokens[1] or topi.item() == topi.item() == self.out_tokens[2]:
+                        #If it predicts EOS or PAD token, stop
                         break
                     else:
                         decoded_words.append(self.output_indexer.get_object(topi.item()))
@@ -152,7 +157,7 @@ class RNNEncoder(nn.Module):
     with a leading dimension of 1 (i.e., use batch size 1)
     """
 
-    def __init__(self, input_size, hidden_size, num_layers=3, dropout_p=0.2):
+    def __init__(self, input_size, hidden_size, num_layers, dropout_p=0.2, bidirect=True):
         """
         :param input_emb_dim: size of word embeddings output by embedding layer
         :param hidden_size: hidden size for the LSTM
@@ -164,7 +169,9 @@ class RNNEncoder(nn.Module):
         self.dropout_p = dropout_p
         self.embedding = nn.Embedding(input_size, hidden_size)
         self.dropout = nn.Dropout(self.dropout_p)
-        self.gru = nn.GRU(hidden_size, hidden_size, bidirectional=True)
+        self.bidirect = bidirect
+        self.num_layers = num_layers
+        self.gru = nn.GRU(hidden_size, hidden_size, num_layers, bidirectional=bidirect)
 
     def forward(self, input, hidden):
         # print(f'Forward input (pre-embed) Shape: {input.shape}')
@@ -177,7 +184,10 @@ class RNNEncoder(nn.Module):
         return output, hidden
 
     def initHidden(self):
-        return torch.zeros(2, 1, self.hidden_size, device=device)
+        dim1 = self.num_layers
+        if self.bidirect:
+            dim1 = dim1 * 2
+        return torch.zeros(dim1, 1, self.hidden_size, device=device)
 
 
 class RNNDecoder(nn.Module):
@@ -202,19 +212,21 @@ class RNNDecoder(nn.Module):
 
 
 class AttnDecoderRNN(nn.Module):
-    def __init__(self, hidden_size, output_size, max_length, dropout_p=0.2):
+    def __init__(self, hidden_size, output_size, max_length, num_layers=1, dropout_p=0.2, bidirect=True):
         super(AttnDecoderRNN, self).__init__()
         self.hidden_size = hidden_size
         self.output_size = output_size
         self.dropout_p = dropout_p
         self.max_length = max_length
+        self.num_layers = num_layers
+        self.bidirect = bidirect
 
         self.embedding = nn.Embedding(self.output_size, self.hidden_size)
-        self.attn = nn.Linear(self.hidden_size * 2, self.max_length)
-        self.attn_combine = nn.Linear(self.hidden_size * 3, self.hidden_size)
+        self.attn = nn.Linear(self.hidden_size*2, self.max_length)
+        self.attn_combine = nn.Linear(self.hidden_size * 2, self.hidden_size)
         self.dropout = nn.Dropout(self.dropout_p)
-        self.gru = nn.GRU(self.hidden_size, self.hidden_size, bidirectional=True)
-        self.out = nn.Linear(self.hidden_size*2, self.output_size)
+        self.gru = nn.GRU(self.hidden_size, self.hidden_size, num_layers, bidirectional=bidirect)
+        self.out = nn.Linear(self.hidden_size, self.output_size)
 
     def forward(self, input, hidden, encoder_outputs):
         embedded = self.embedding(input).view(1, 1, -1)
@@ -243,7 +255,10 @@ class AttnDecoderRNN(nn.Module):
         return output, hidden, attn_weights
 
     def initHidden(self):
-        return torch.zeros(2, 1, self.hidden_size, device=device)
+        dim1 = self.num_layers
+        if self.bidirect:
+            dim1 = dim1*2
+        return torch.zeros(dim1, 1, self.hidden_size, device=device)
 
 
 def make_padded_input_tensor(exs: List[Example], input_indexer: Indexer, max_len: int,
@@ -293,14 +308,13 @@ def train(input_tensor, target_tensor, encoder, decoder, encoder_optimizer, deco
     input_length = input_tensor.size(0)
     target_length = target_tensor.size(0)
 
-    encoder_outputs = torch.zeros(max_length, encoder.hidden_size*2, device=device)
+    encoder_outputs = torch.zeros(max_length, encoder.hidden_size, device=device)
     #print(f'Encoder_Outputs: {encoder_outputs.shape}')
 
     loss = 0
 
     for ei in range(input_length):
-        encoder_output, encoder_hidden = encoder(
-            input_tensor[ei], encoder_hidden)
+        encoder_output, encoder_hidden = encoder(input_tensor[ei], encoder_hidden)
         #print(f'encoder_output00: {encoder_output[0,0].shape}')
         encoder_outputs[ei] = encoder_output[0, 0]
 
@@ -342,7 +356,7 @@ def train(input_tensor, target_tensor, encoder, decoder, encoder_optimizer, deco
     return loss.item() / target_length
 
 
-def train_model_encdec(train_data: List[Example], dev_data: List[Example], input_indexer, output_indexer,
+def train_model_encdec(train_data: List[Example], dev_data: List[Example], test_data: List[Example], input_indexer, output_indexer,
                        args) -> Seq2SeqSemanticParser:
     """
     Function to train the encoder-decoder model on the given data.
@@ -354,23 +368,33 @@ def train_model_encdec(train_data: List[Example], dev_data: List[Example], input
     :return:
     """
     # Create indexed input
-    input_max_len = np.max(np.asarray([len(ex.x_indexed) for ex in train_data]))
+
     for ex in dev_data:
         train_data.append(ex)
-    all_train_input_data = make_padded_input_tensor(train_data, input_indexer, input_max_len, reverse_input=False)
-    all_test_input_data = make_padded_input_tensor(dev_data, input_indexer, input_max_len, reverse_input=False)
-
-    tokens = []
-    tokens.append(output_indexer.index_of('<SOS>'))
-    tokens.append(output_indexer.index_of('<EOS>'))
-    tokens.append(output_indexer.index_of('<PAD>'))
-    print(f'Start\Stop\Pad Tokens: {tokens}')
+    for ex in test_data:
+        train_data.append(ex)
+    input_max_len = np.max(np.asarray([len(ex.x_indexed) for ex in train_data]))
     output_max_len = np.max(np.asarray([len(ex.y_indexed) for ex in train_data]))
+    print(f'Input Max Length: {input_max_len}')
+    print(f'Output Max Length: {output_max_len}')
+    all_train_input_data = make_padded_input_tensor(train_data, input_indexer, output_max_len, reverse_input=False)
+    all_test_input_data = make_padded_input_tensor(dev_data, input_indexer, output_max_len, reverse_input=False)
+
+    out_tokens = []
+    out_tokens.append(output_indexer.index_of('<SOS>'))
+    out_tokens.append(output_indexer.index_of('<EOS>'))
+    out_tokens.append(output_indexer.index_of('<PAD>'))
+
+    in_tokens = []
+    in_tokens.append(output_indexer.index_of('<PAD>'))
+    in_tokens.append(output_indexer.index_of('<UNK>'))
+
+    print(f'Start\Stop\Pad Tokens: {out_tokens}')
     all_train_output_data = make_padded_output_tensor(train_data, output_indexer, output_max_len)
     all_test_output_data = make_padded_output_tensor(dev_data, output_indexer, output_max_len)
 
     # print(f'Transformed Output Sample: {all_train_output_data[0]}')
-    print(f'Input Max Length: {torch.Tensor([input_max_len]).type(torch.LongTensor)}')
+
 
     if args.print_dataset:
         print("Train length: %i" % input_max_len)
@@ -380,17 +404,18 @@ def train_model_encdec(train_data: List[Example], dev_data: List[Example], input
     # First create a model. Then loop over epochs, loop over examples, and given some indexed words
     # call your seq-to-seq model, accumulate losses, update parameters
 
-    EMBED_DIM = 8
-    NUM_LAYERS = 3
-    HIDDEN_DIM = 156
+    EMBED_DIM = 12
+    NUM_LAYERS = 2
+    HIDDEN_DIM = 256
     DROP_PROB = 0.2
-    learning_rate = 0.001
+    BIDIRECT = False
+    learning_rate = 0.002
     lr_update_freq = 20
     epochs = 100
     print_every = 1
 
 
-    s2smodel = Seq2SeqSemanticParser(input_indexer, output_indexer, EMBED_DIM, HIDDEN_DIM, output_max_len, tokens, DROP_PROB)
+    s2smodel = Seq2SeqSemanticParser(input_indexer, output_indexer, EMBED_DIM, HIDDEN_DIM, output_max_len, in_tokens, out_tokens, NUM_LAYERS, DROP_PROB, BIDIRECT)
     encoder = s2smodel.encoder
     decoder = s2smodel.decoder
     input = torch.Tensor(all_train_input_data).type(torch.LongTensor)
@@ -419,7 +444,7 @@ def train_model_encdec(train_data: List[Example], dev_data: List[Example], input
             # print(f'Target Tensor Shape: {target_tensor.shape}')
             # print(f'Target Tensor: {target_tensor}')
             loss = train(input_tensor, target_tensor, encoder, decoder, encoder_optimizer, decoder_optimizer, criterion,
-                         output_max_len, tokens)
+                         output_max_len, out_tokens)
             print_loss_total += loss
 
         if epoch % print_every == 0:
